@@ -1,72 +1,93 @@
 # Session Context Extractor V2
 
-**Give your AI agent a persistent memory — so it remembers what you tell it, what you decide, who you mention, and what you do, across every session.**
+Your AI agent forgets everything when a session ends. This skill gives it a memory that actually works.
 
-By default your agent forgets everything when a session ends. This skill fixes that. Your agent passively listens to your conversations and logs anything worth remembering — contacts, decisions, preferences, daily activity, and more. Ask about it later and get real answers from your actual history, not guesses.
-
-Examples of what it remembers:
-- "My boss's name is Scott" → stored as a contact, recalled anytime
-- "I prefer dark mode" → stored as a preference
-- "We decided to go with OCI over Azure" → stored as a decision with reasoning
-- "I ran 2.5 miles this morning" → stored and aggregated across the week
-- "I spent $45 on lunch and earned $200 from a client" → tracked, totaled, net calculated
-
-Ask your agent later:
-- "Who is my boss?" → Scott
-- "What did we decide about cloud providers?" → full decision with reasoning
-- "Give me a weekly summary" → totals for miles, sleep, money, hours, tasks, and anything else logged
-- "What are my preferences?" → everything you've mentioned
+Tell your agent about your day, mention someone's name, make a decision — it captures all of it automatically. Ask about it later and get real answers from your actual history. No hallucination. No re-explaining yourself every session.
 
 ---
 
-## What Gets Captured
+## Performance
 
-Your agent listens for anything worth remembering and logs it automatically:
+Most memory systems slow down as they grow. This one doesn't.
 
-| What you say | What gets stored |
-|---|---|
-| "My boss is Scott" | Contact fact |
-| "I prefer to work in the mornings" | Preference fact |
-| "We decided to use OCI" | Decision fact with reasoning |
-| "I ran 2.3 miles today" | Information fact, aggregated |
-| "I spent $18 on lunch, earned $200 from a client" | Information fact, net calculated |
-| "I slept 7 hours, drank 9 glasses of water" | Information fact, aggregated |
-| "Completed 5 tasks, studied for 2 hours" | Information fact, aggregated |
+Facts are extracted and stored as structured data at distill time — not as raw conversation text. Queries run against SQLite with indexed columns. The result is sub-20ms query time regardless of how many facts are stored. 10 facts or 100,000 facts — same speed.
 
-You do not need to ask the agent to log things. It listens and writes automatically.
+That also means recall is deterministic. When you ask how many miles you ran this week, the system computes the exact number from your logs. Not a semantic guess from a language model. Not a summary of a summary. The actual number.
 
 ---
 
-## Step 1 — Install
+## What It Does
 
-Paste this into your agent's chat:
+**Passive capture** — your agent listens to every conversation and logs anything worth remembering without being asked:
+
+- People you mention → stored as contacts, profile created automatically
+- Decisions you make → stored with context, grouped by topic
+- Preferences you express → stored and applied going forward
+- Daily activity → tracked and aggregated across the week
+- Errors and problems → logged with resolution status
+
+**Intelligent recall** — ask natural questions and get real answers:
+
+- *"Who is my project manager?"* → name, role, when you first mentioned them
+- *"What did we decide about OCI?"* → full decision with date and reasoning
+- *"Give me a weekly summary"* → real totals: miles, sleep, hours worked, money in/out, net
+- *"How many commits did I make this week?"* → exact number from your logs
+
+**Automatic organization** — every fact goes to the right place:
+
+- `context-vault/people/` — one profile per contact, updated on every mention
+- `context-vault/projects/` — one file per topic, decisions accumulate over time
+- `context-vault/errors/` — error log with status tracking
+- `USER.md` — your agent's profile of you, updated automatically as it learns
+
+**Weekly archiving** — old daily files are moved to `memory/archive/` every week, the vault is backed up, and the distill log is compressed. Your data stays organized without manual cleanup.
+
+---
+
+## How It Works
+
+```
+You talk to your agent
+        ↓
+Agent writes facts to memory/dailies/YYYY-MM-DD.md
+        ↓
+Nightly distillation extracts and stores facts in SQLite vault
+        ↓
+Facts are indexed → people/, projects/, errors/, USER.md
+        ↓
+You ask a question → vault is queried → real answer returned
+```
+
+Numbers and units are extracted automatically from any fact — miles, hours, dollars, calories, steps, anything. Totals are computed at query time, grouped by date. Net financials calculated automatically.
+
+---
+
+## Install
+
+**Step 1 — Clone and install**
 
 > 📋 Paste this to your agent
 
 ```
 use the exec tool to run these commands one at a time:
-
 cd ~/.openclaw/workspace/skills
-git clone https://github.com/jasonklutts/session-context-extractor-v2-copy-.git session-context-extractor-v2
+git clone https://github.com/jasonklutts/session-context-extractor-v2.git session-context-extractor-v2
 cd session-context-extractor-v2
 npm install
+npm run v2:setup
 ```
 
-Then verify it worked:
+The setup command handles everything automatically:
+- Creates all required directories including `context-vault/people/`, `projects/`, `errors/`, `archive/`
+- Adds heartbeat config to `openclaw.json` for nightly distillation
+- Creates or updates `HEARTBEAT.md` with distillation and weekly archive schedules
+- Creates `USER.md` template if one doesn't exist
+- Creates a backup script at `scripts/backup-vault.sh`
+- Runs first distillation if daily files are already present
 
-> 📋 Paste this to your agent
+**Step 2 — Give your agent its instructions**
 
-```
-use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
-```
-
-You should see: `No recent facts found` — correct, the vault is empty and ready.
-
----
-
-## Step 2 — Give Your Agent Its Standing Instructions
-
-Paste the block below directly into your agent's chat. This is a one-time setup. Your agent will follow these instructions automatically in every conversation from now on.
+Paste this block directly into your agent's chat. This is a one-time setup.
 
 > 📋 Paste this to your agent
 
@@ -76,33 +97,32 @@ You now have a persistent memory system. Follow these instructions in every conv
 PASSIVE CAPTURE — always on:
 Listen to everything said in our conversations. Whenever you hear something worth remembering, write it to ~/.openclaw/workspace/memory/dailies/YYYY-MM-DD.md using today's date. Do this without being asked. Things worth logging include:
 
-- Any person mentioned: their name, role, relationship
-  Example: * Contact: Scott is my boss at Delta Utilities
+- Any person mentioned: name, role, relationship
+  * Contact: Sarah is my project manager at Delta Utilities
 
 - Any preference expressed: tools, habits, styles, opinions
-  Example: * Preference: prefers to work in the mornings
+  * Preference: prefers bullet points in technical summaries
 
 - Any decision made: what was chosen and why
-  Example: * Decision: chose OCI over Azure because Delta uses OCI
+  * Decision: Decided to prioritize OCI certification before AZ-104 because Delta uses OCI
 
 - Any daily activity: exercise, sleep, food, work, study, finances
-  Example: * Information: Ran 2.3 miles in 19:45, felt strong
-  Example: * Information: Slept 7 hours, drank 9 glasses water
-  Example: * Information: Worked 8 hours on Delta project
-  Example: * Information: Studied OCI for 2 hours, made 6 commits
-  Example: * Information: Ate 2200 calories, spent $18 on lunch
-  Example: * Information: earned $100 from consulting work
-  Example: * Information: Completed 5 tasks, read 30 pages
+  * Information: Ran 2.3 miles in 19:45, felt good
+  * Information: Slept 7 hours, drank 9 glasses water
+  * Information: Worked 8 hours on Delta project
+  * Information: Studied OCI for 2 hours, made 6 commits
+  * Information: Ate 2200 calories, spent $18 on lunch
+  * Information: earned $100 from consulting work
+  * Information: Completed 5 tasks, read 30 pages
 
-- Any error or problem encountered: what went wrong and how it was resolved
-  Example: * Error: Proxmox dropped to emergency mode after ungraceful shutdown
+- Any error or problem encountered
+  * Error: Proxmox dropped to emergency mode after ungraceful shutdown
 
 FORMAT RULES:
 - Use * Information:, * Decision:, * Contact:, * Preference:, or * Error: at the start of each line
 - Keep earned and spent on separate lines
 - Write money as: earned $X or spent $X (lowercase)
 - One fact per line where possible
-- Always use today's actual date in the filename
 
 RECALLING — when asked:
 When asked about past context, summaries, totals, or anything from memory, use the exec tool to run:
@@ -112,84 +132,59 @@ Then summarize the results in plain language.
 Never append distilled session facts to MEMORY.md. All distill output goes to the session-context-extractor skill only.
 ```
 
----
-
-## Step 3 — Start the Overnight Distillation
-
-The skill automatically processes your daily logs every night at 21:00 and stores them in the memory vault. Start it now:
-
-> 📋 Paste this to your agent
-
-```
-use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:start &
-```
-
-This runs in the background. You do not need to run it again unless the process is restarted.
+That's it. Your agent is set up.
 
 ---
 
-## Step 4 — Just Talk
+## Daily Usage
 
-You are set up. Have normal conversations with your agent. It handles the rest.
+**Just talk normally.** Your agent captures everything automatically.
 
-**Examples of things it will capture automatically:**
+> *"I ran 2.5 miles this morning, slept 7 hours, worked 8 hours on the Delta project, earned $200 from a client."*
 
-> "My dentist's name is Dr. Rivera, she's at Tulane Medical."
+> *"My new dentist is Dr. Rivera at Tulane Medical."*
 
-> "I've decided to focus on OCI certification before starting AZ-104."
+> *"I've decided to focus on OCI before starting AZ-104."*
 
-> "I prefer bullet points over long paragraphs in summaries."
+**Ask anything about your history:**
 
-> "I ran 2.5 miles this morning, slept 7 hours 45 minutes, earned $250 from a freelance project."
+> *"Give me a weekly summary"*
 
-**Examples of things you can ask later:**
+> *"Who is Dr. Rivera?"*
 
-> "Who is my dentist?"
+> *"How many miles did I run this week?"*
 
-> "What certifications am I working on?"
+> *"What decisions have I made about certifications?"*
 
-> "What are my formatting preferences?"
-
-> "Give me a comprehensive weekly summary."
-
-> "How many miles did I run this week?"
-
-> "What did I earn and spend this week?"
+> *"What did I earn and spend this week?"*
 
 ---
 
-## Manual Commands (For Testing or Troubleshooting)
+## Manual Commands
 
-You do not need these during normal use.
+You don't need these for normal use — your agent handles everything. But they're here if you want to test or troubleshoot.
 
 **Run distillation manually:**
-
-> 📋 Paste this to your agent
-
 ```
 use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:distill
 ```
 
-**Query manually:**
-
-> 📋 Paste this to your agent
-
+**Query the vault:**
 ```
 use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:query "comprehensive weekly summary"
 ```
 
 **List stored facts:**
-
-> 📋 Paste this to your agent
-
 ```
 use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
 ```
 
-**Full reset (wipe everything and start over):**
+**Run weekly archive:**
+```
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:archive
+```
 
-> 📋 Paste this to your agent
-
+**Full reset:**
 ```
 use the exec tool to run: rm /home/openclaw/.openclaw/workspace/context-vault/vault.db && rm /home/openclaw/.openclaw/workspace/.last_distill_date && cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:distill
 ```
@@ -198,52 +193,68 @@ use the exec tool to run: rm /home/openclaw/.openclaw/workspace/context-vault/va
 
 ## Troubleshooting
 
-**"Extracted 0 facts" when distilling manually**
-
-The system thinks it already processed your files. Run this then distill again:
-
-> 📋 Paste this to your agent
-
+**"Extracted 0 facts" after distill**
 ```
 use the exec tool to run: rm /home/openclaw/.openclaw/workspace/.last_distill_date
 ```
+Then distill again.
 
 **"No results found" when querying**
 
-Check that facts are stored:
-
-> 📋 Paste this to your agent
-
+Check facts are stored first:
 ```
 use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
 ```
 
-If the list is empty, run distill manually. If the list has facts but queries return nothing, try simpler terms — "miles", "sleep", "summary", or the name of a person.
-
 **Old or wrong data showing up**
 
-Do a full reset using the command above.
+Run a full reset using the command above.
 
 ---
 
-## How It Works
+## What Makes This Different
 
-1. Your agent passively listens to your conversations and writes facts to a daily markdown file automatically
-2. Every night at 21:00 the distiller reads your daily files, extracts every fact, and stores everything in a local SQLite database
-3. Numbers and units are parsed automatically — miles, hours, dollars, steps, anything
-4. When you ask a question, the engine searches the vault and returns real answers from your actual history
-5. For numeric queries, facts are grouped by date and totals are computed — no guessing
+Most agent memory systems store raw conversation text and rely on the LLM to recall it semantically. This system extracts structured facts at distillation time and stores them in SQLite — so recall is deterministic, not probabilistic.
 
-All data stays local. No cloud. No external services required.
+Numbers and units are detected generically — miles, steps, hours, dollars, calories, cups, reps, anything. You don't configure metrics. You just write naturally and the system figures it out.
+
+The index layer means your data is also human-readable without querying. Open `context-vault/people/` and browse contact profiles. Open `context-vault/projects/` and read your decision history. It's a filing system, not just a database.
+
+---
+
+## File Structure
+
+```
+~/.openclaw/workspace/
+  memory/
+    dailies/          ← daily log files (YYYY-MM-DD.md)
+    archive/          ← weekly archived files (YYYY-WXX/)
+  context-vault/
+    vault.db          ← SQLite fact database
+    people/           ← contact profiles (one .md per person)
+    projects/         ← decision files (one .md per topic)
+    errors/           ← error logs (one .md per incident)
+    backups/          ← weekly vault backups
+  USER.md             ← auto-updated agent profile of you
+  HEARTBEAT.md        ← heartbeat schedule with distillation tasks
+
+skills/session-context-extractor-v2/
+  src/
+    distillation.ts   ← extracts facts from daily files
+    query-engine.ts   ← aggregation and retrieval
+    indexer.ts        ← writes people/projects/errors profiles
+    user-updater.ts   ← updates USER.md automatically
+    archiver.ts       ← weekly archive and backup
+    setup.ts          ← one-time setup
+    v2.ts             ← CLI entry point
+```
 
 ---
 
 ## License
 
-MIT License.
+MIT
 
 ---
 
-## Built For
-
-Heyron Agent Jam #1 — May 2026
+*Built for Heyron Agent Jam #1 — May 2026*

@@ -2,26 +2,15 @@ import fs from 'fs';
 import path from 'path';
 import { VaultDatabase } from './db';
 import { VaultWriter } from './vault-writer';
+import { Indexer } from './indexer';
+import { UserUpdater } from './user-updater';
 import { Fact } from './types';
 
-/**
- * OpenClaw Phase 2: DISTILLATION
- *
- * Pipeline:
- * 1. READ .last_distill_date
- * 2. FOR EACH daily: Extract Decision/Information/Insight/Error lines
- * 3. DEDUPLICATE: Remove exact + near-duplicates (>80% similar)
- * 4. EVALUATE STABILITY
- * 5. REFORMULATE: Rewrite clearly for retrieval
- * 6. EXTRACT METRICS: Parse any number+unit pairs from content generically
- * 7. DISTRIBUTE: Write to vault DB + skill-local distill-log.md
- * 8. WRITE .last_distill_date = today
- *
- * NOTE: Does NOT write to the main workspace MEMORY.md.
- */
 export class DistillationEngine {
   private db: VaultDatabase;
   private writer: VaultWriter;
+  private indexer: Indexer;
+  private userUpdater: UserUpdater;
   private workspacePath: string;
   private skillPath: string;
 
@@ -29,12 +18,9 @@ export class DistillationEngine {
     this.workspacePath = workspacePath;
     this.db = db;
     this.writer = writer;
-    this.skillPath = path.join(
-      workspacePath,
-      'skills',
-      'session-context-extractor-v2',
-      'memory'
-    );
+    this.indexer = new Indexer(workspacePath);
+    this.userUpdater = new UserUpdater(workspacePath);
+    this.skillPath = path.join(workspacePath, 'skills', 'session-context-extractor-v2', 'memory');
   }
 
   async distillAll(): Promise<void> {
@@ -58,7 +44,6 @@ export class DistillationEngine {
     for (const file of files) {
       const dateStr = file.replace('.md', '');
       if (lastDate && dateStr <= lastDate) continue;
-
       const filePath = path.join(dailiesDir, file);
       console.log(`[DISTILL] Extracting: ${file}`);
       const content = fs.readFileSync(filePath, 'utf-8');
@@ -79,9 +64,11 @@ export class DistillationEngine {
     for (const fact of reformulated) {
       this.db.saveFact(fact);
       this.writer.writeFact(fact);
+      this.indexer.index(fact);
     }
 
     this.appendDistillLog(reformulated);
+    this.userUpdater.update(reformulated);
 
     const today = new Date().toISOString().split('T')[0];
     fs.writeFileSync(stateFile, today);
@@ -89,16 +76,10 @@ export class DistillationEngine {
     console.log(`[DISTILL] Complete. Stored ${reformulated.length} facts.`);
   }
 
-  /**
-   * Generic number+unit extractor.
-   * Named patterns take priority over generic fallback.
-   * Returns a map of metric_key -> value.
-   */
   extractMetrics(content: string): Record<string, number> {
     const metrics: Record<string, number> = {};
     const lower = content.toLowerCase();
 
-    // --- Sleep: "slept X hours Y minutes" or "slept X hours" ---
     const sleepFull = lower.match(/slept\s+(\d+)\s+hours?\s+(\d+)\s+minutes?/);
     if (sleepFull) {
       metrics['hours_sleep'] = parseInt(sleepFull[1]) + parseInt(sleepFull[2]) / 60;
@@ -107,53 +88,41 @@ export class DistillationEngine {
       if (sleepSimple) metrics['hours_sleep'] = parseFloat(sleepSimple[1]);
     }
 
-    // --- Hours worked: "worked X hours" ---
     const worked = lower.match(/worked\s+(\d+\.?\d*)\s+hours?/);
     if (worked) metrics['hours_worked'] = parseFloat(worked[1]);
 
-    // --- Hours studied: "studied X for Y hours" ---
     const studied = lower.match(/studied\s+\S+\s+for\s+(\d+\.?\d*)\s+hours?/) ||
                     lower.match(/studied\s+for\s+(\d+\.?\d*)\s+hours?/);
     if (studied) metrics['hours_studied'] = parseFloat(studied[1]);
 
-    // --- Miles: any "X miles" ---
     const miles = lower.match(/(\d+\.?\d*)\s+miles?/);
     if (miles) metrics['miles'] = parseFloat(miles[1]);
 
-    // --- Calories: "X calories" ---
     const calories = lower.match(/(\d+)\s+calories?/);
     if (calories) metrics['calories'] = parseInt(calories[1]);
 
-    // --- Water: "X glasses water" ---
     const water = lower.match(/(\d+)\s+glasses?\s*(?:of\s+)?water/);
     if (water) metrics['glasses_water'] = parseInt(water[1]);
 
-    // --- Tasks: "completed X tasks" ---
     const tasks = lower.match(/completed\s+(\d+)\s+tasks?/);
     if (tasks) metrics['tasks'] = parseInt(tasks[1]);
 
-    // --- Commits: "made X commits" ---
     const commits = lower.match(/made\s+(\d+)\s+commits?/);
     if (commits) metrics['commits'] = parseInt(commits[1]);
 
-    // --- Pages: "read X pages" ---
     const pages = lower.match(/read\s+(\d+)\s+pages?/);
     if (pages) metrics['pages'] = parseInt(pages[1]);
 
-    // --- Spent: all "spent $X" occurrences ---
     const spentMatches = [...lower.matchAll(/spent\s+\$(\d+\.?\d*)/g)];
     if (spentMatches.length > 0) {
       metrics['dollars_spent'] = spentMatches.reduce((sum, m) => sum + parseFloat(m[1]), 0);
     }
 
-    // --- Earned: "earned $X" or "made $X" ---
     const earnedMatches = [...lower.matchAll(/(?:earned|made)\s+\$(\d+\.?\d*)/g)];
     if (earnedMatches.length > 0) {
       metrics['dollars_earned'] = earnedMatches.reduce((sum, m) => sum + parseFloat(m[1]), 0);
     }
 
-    // --- Generic fallback: any "X unit" pairs not already captured ---
-    // Explicitly exclude units already handled above and time/pace units
     const excludedUnits = new Set([
       'mile', 'calorie', 'glass', 'task', 'commit', 'page',
       'hour', 'minute', 'second', 'min', 'sec',
@@ -165,7 +134,7 @@ export class DistillationEngine {
       const value = parseFloat(m[1]);
       let unit = m[2].replace(/s$/, '').trim();
       if (excludedUnits.has(unit)) continue;
-      if (unit === 'mile') continue; // already handled
+      if (unit === 'mile') continue;
       if (!metrics[unit]) metrics[unit] = 0;
       metrics[unit] += value;
     }
@@ -204,7 +173,6 @@ export class DistillationEngine {
       if (!type || !text) continue;
 
       const metrics = type === 'information' ? this.extractMetrics(text) : {};
-
       const baseDetails: Record<string, unknown> = { metrics };
 
       if (type === 'decision') {

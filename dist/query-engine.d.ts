@@ -3,40 +3,27 @@ import { Fact, FactType, QueryResult, VaultQuery } from './types';
 export declare class QueryEngine {
     private db;
     private index;
+    private retrieval;
     constructor(db: VaultDatabase);
-    /**
-     * Search facts by natural language query
-     */
     search(query: VaultQuery): QueryResult[];
-    /**
-     * Get all facts of a specific type
-     */
     getByType(type: FactType, limit?: number): Fact[];
-    /**
-     * Get recent facts from the last N days
-     */
     getRecent(days?: number): Fact[];
-    /**
-     * Answer natural language questions about the vault
-     */
     askQuestion(question: string): QueryResult[];
+    private isAggregateQuery;
+    private aggregateResults;
+    private detectGroupKey;
+    private extractGroupValue;
+    /**
+     * Build aggregation summary using pre-extracted metrics from fact.details.metrics.
+     * Falls back to content string if metrics not present (facts distilled before this version).
+     * Any metric key found across the group is summed automatically — no hardcoded units.
+     */
+    private buildAggregationSummary;
     private scoreRelevance;
     private generateContext;
-    /**
-     * Get facts that need verification
-     */
     getUnverified(): Fact[];
-    /**
-     * Get decisions that might be stale
-     */
-    getStaledecisions(daysThreshold?: number): Fact[];
-    /**
-     * Get errors by affected system
-     */
+    getStaleDecisions(daysThreshold?: number): Fact[];
     getErrorsBySystem(system: string): Fact[];
-    /**
-     * Get decision history for a topic
-     */
     getDecisionHistory(topic: string): Fact[];
 }
 //# sourceMappingURL=query-engine.d.ts.map

@@ -1,19 +1,19 @@
 /**
  * COMPLETE SYSTEM: 5-Layer OpenClaw Architecture
- *
- * Layer 1: CAPTURE → memory/dailies/YYYY-MM-DD.md (handled by user)
+ * Layer 1: CAPTURE      → memory/dailies/YYYY-MM-DD.md (handled by user)
  * Layer 2: DISTILLATION → Auto-extract via cron daily at 21:00
  * Layer 3: ATOMIC STORAGE → One fact per file (context-vault/atomic/)
  * Layer 4: GRAPH LINKING → Relationship detection
- * Layer 5: RETRIEVAL → 8 strategies for finding information
+ * Layer 5: RETRIEVAL    → 8 strategies + aggregation via QueryEngine
  *
- * SELF-IMPROVEMENT: Pattern detection, promotion to MEMORY.md
+ * SELF-IMPROVEMENT: Pattern detection, promotion to skill-local distill-log.md
  */
 export declare class MemorySystemV2 {
     private workspacePath;
     private db;
     private writer;
     private distillation;
+    private queryEngine;
     private retrieval;
     private selfImprovement;
     private cron;

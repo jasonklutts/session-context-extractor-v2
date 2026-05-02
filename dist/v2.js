@@ -8,6 +8,7 @@ const path_1 = __importDefault(require("path"));
 const db_1 = require("./db");
 const vault_writer_1 = require("./vault-writer");
 const distillation_1 = require("./distillation");
+const query_engine_1 = require("./query-engine");
 const retrieval_strategies_1 = require("./retrieval-strategies");
 const self_improvement_1 = require("./self-improvement");
 const cron_1 = require("./cron");
@@ -15,21 +16,22 @@ const atomic_1 = require("./atomic");
 const graph_1 = require("./graph");
 /**
  * COMPLETE SYSTEM: 5-Layer OpenClaw Architecture
- *
- * Layer 1: CAPTURE → memory/dailies/YYYY-MM-DD.md (handled by user)
+ * Layer 1: CAPTURE      → memory/dailies/YYYY-MM-DD.md (handled by user)
  * Layer 2: DISTILLATION → Auto-extract via cron daily at 21:00
  * Layer 3: ATOMIC STORAGE → One fact per file (context-vault/atomic/)
  * Layer 4: GRAPH LINKING → Relationship detection
- * Layer 5: RETRIEVAL → 8 strategies for finding information
+ * Layer 5: RETRIEVAL    → 8 strategies + aggregation via QueryEngine
  *
- * SELF-IMPROVEMENT: Pattern detection, promotion to MEMORY.md
+ * SELF-IMPROVEMENT: Pattern detection, promotion to skill-local distill-log.md
  */
 class MemorySystemV2 {
-    constructor(workspacePath = process.env.OPENCLAW_WORKSPACE || path_1.default.join(process.env.HOME || '', '.openclaw', 'workspace')) {
+    constructor(workspacePath = process.env.OPENCLAW_WORKSPACE ||
+        path_1.default.join(process.env.HOME || '', '.openclaw', 'workspace')) {
         this.workspacePath = workspacePath;
         this.db = new db_1.VaultDatabase(workspacePath);
         this.writer = new vault_writer_1.VaultWriter(workspacePath);
         this.distillation = new distillation_1.DistillationEngine(workspacePath, this.db, this.writer);
+        this.queryEngine = new query_engine_1.QueryEngine(this.db);
         this.retrieval = new retrieval_strategies_1.RetrievalSystem();
         this.selfImprovement = new self_improvement_1.SelfImprovementManager(workspacePath);
         this.cron = new cron_1.CronManager(workspacePath);
@@ -47,31 +49,47 @@ class MemorySystemV2 {
         console.log('[V2] Starting daily distillation cron (21:00)');
         this.cron.startDistillationCron();
     }
-    // LAYER 2: Manual distillation (for testing)
+    // LAYER 2: Manual distillation
     async distill() {
         console.log('[V2] Running distillation...');
         await this.distillation.distillAll();
         console.log('[V2] Distillation complete');
-        // Auto-update relationships after distillation
         const allFacts = this.db.getRecentFacts(7);
         if (allFacts.length > 0) {
             this.graph.autoLinkFacts(allFacts.map(f => ({ id: f.id, content: f.content, title: f.title })));
         }
     }
-    // LAYER 5: Query with all 8 retrieval strategies
+    // LAYER 5: Query via QueryEngine (aggregation + 8 retrieval strategies)
     query(queryText) {
         console.log(`[V2] Query: "${queryText}"\n`);
-        const allFacts = this.db.getRecentFacts(30); // Get recent facts
-        const results = this.retrieval.search(queryText, allFacts);
+        // Use QueryEngine for aggregation-aware search
+        const results = this.queryEngine.askQuestion(queryText);
         if (results.length === 0) {
-            console.log('No results found.\n');
+            // Fallback: raw retrieval across last 30 days
+            const allFacts = this.db.getRecentFacts(30);
+            const rawResults = this.retrieval.search(queryText, allFacts);
+            if (rawResults.length === 0) {
+                console.log('No results found.\n');
+                return;
+            }
+            console.log(`Found ${rawResults.length} results (raw retrieval):\n`);
+            for (const { fact, score } of rawResults.slice(0, 10)) {
+                console.log(`[${(score * 100).toFixed(0)}%] ${fact.title}`);
+                console.log(`  ${fact.content.substring(0, 150)}`);
+                const relations = this.graph.getRelations(fact.id);
+                if (relations.length > 0) {
+                    console.log(`  Related: ${relations.map(r => r.description).join(', ')}`);
+                }
+                console.log();
+            }
             return;
         }
-        console.log(`Found ${results.length} results:\n`);
-        for (const { fact, score } of results.slice(0, 5)) {
-            console.log(`[${(score * 100).toFixed(0)}%] ${fact.title}`);
-            console.log(`  ${fact.content.substring(0, 100)}...`);
-            // Show related facts
+        console.log(`Found ${results.length} result(s):\n`);
+        for (const { fact, score, context } of results.slice(0, 10)) {
+            console.log(`[${score.toFixed(1)}] ${fact.title}`);
+            console.log(`  ${fact.content.substring(0, 2000)}`);
+            if (context)
+                console.log(`  ${context}`);
             const relations = this.graph.getRelations(fact.id);
             if (relations.length > 0) {
                 console.log(`  Related: ${relations.map(r => r.description).join(', ')}`);
@@ -81,7 +99,9 @@ class MemorySystemV2 {
     }
     // LAYER 3: List facts
     list(type) {
-        const facts = type ? this.db.getFactsByType(type, 20) : this.db.getRecentFacts(7);
+        const facts = type
+            ? this.db.getFactsByType(type, 50)
+            : this.db.getRecentFacts(7);
         if (facts.length === 0) {
             console.log(`No ${type ? type : 'recent'} facts found.`);
             return;
@@ -144,17 +164,19 @@ if (require.main === module) {
 Session Context Extractor — V2 Production
 
 Commands:
-  start-cron          Start daily distillation at 21:00
-  distill             Run distillation immediately
-  query "<text>"      Search with 8 retrieval strategies
-  list [type]         List facts (decision|error|preference|contact)
-  review              Self-improvement report
-  graph               Relationship visualization
+  start-cron         Start daily distillation at 21:00
+  distill            Run distillation immediately
+  query "<text>"     Search with aggregation + 8 retrieval strategies
+  list [type]        List facts (decision|error|preference|contact|information)
+  review             Self-improvement report
+  graph              Relationship visualization
 
-Example:
+Examples:
   npm run v2:distill
   npm run v2:query "What did we decide about OCI?"
-          `);
+  npm run v2:query "total this week"
+  npm run v2:query "how many miles did I run"
+`);
                     system.close();
             }
         }

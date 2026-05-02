@@ -82,7 +82,7 @@ async function main() {
       }
 
       case 'stale': {
-        const stale = engine.getStaledecisions(90);
+        const stale = engine.getStaleDecisions(90);
         console.log(`\n⏰ Decisions older than 90 days (${stale.length}):\n`);
         for (const decision of stale.slice(0, 10)) {
           const date = new Date(decision.timestamp).toLocaleDateString();
