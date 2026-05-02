@@ -3,7 +3,14 @@
   "version": "0.1.0",
   "description": "Auto-capture decision reasoning, error history, preferences, and relationships from agent sessions",
   "main": "dist/index.js",
-  "keywords": ["memory","agent","context","decision-tracking","error-history","preferences"],
+  "keywords": [
+    "memory",
+    "agent",
+    "context",
+    "decision-tracking",
+    "error-history",
+    "preferences"
+  ],
   "author": "Jason Klutts",
   "license": "MIT",
   "scripts": {
