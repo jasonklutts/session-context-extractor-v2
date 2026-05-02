@@ -98,18 +98,18 @@ PASSIVE CAPTURE — always on:
 Listen to everything said in our conversations. Whenever you hear something worth remembering, write it to ~/.openclaw/workspace/memory/dailies/YYYY-MM-DD.md using today's date. Do this without being asked. Things worth logging include:
 
 - Any person mentioned: name, role, relationship
-  * Contact: Sarah is my project manager at Delta Utilities
+  * Contact: Sarah is my project manager at Petco
 
 - Any preference expressed: tools, habits, styles, opinions
   * Preference: prefers bullet points in technical summaries
 
 - Any decision made: what was chosen and why
-  * Decision: Decided to prioritize OCI certification before AZ-104 because Delta uses OCI
+  * Decision: Decided to prioritize OCI certification before AZ-104 because Petco uses OCI
 
 - Any daily activity: exercise, sleep, food, work, study, finances
   * Information: Ran 2.3 miles in 19:45, felt good
   * Information: Slept 7 hours, drank 9 glasses water
-  * Information: Worked 8 hours on Delta project
+  * Information: Worked 8 hours on Petco project
   * Information: Studied OCI for 2 hours, made 6 commits
   * Information: Ate 2200 calories, spent $18 on lunch
   * Information: earned $100 from consulting work
@@ -140,7 +140,7 @@ That's it. Your agent is set up.
 
 **Just talk normally.** Your agent captures everything automatically.
 
-> *"I ran 2.5 miles this morning, slept 7 hours, worked 8 hours on the Delta project, earned $200 from a client."*
+> *"I ran 2.5 miles this morning, slept 7 hours, worked 8 hours on the Petco project, earned $200 from a client."*
 
 > *"My new dentist is Dr. Rivera at Tulane Medical."*
 
