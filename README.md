@@ -1,287 +1,249 @@
-# Session Context Extractor
+# Session Context Extractor V2
 
-**Auto-capture decision reasoning, error history, preferences, and relationships from agent sessions.**
+**Give your AI agent a persistent memory — so it remembers what you tell it, what you decide, who you mention, and what you do, across every session.**
 
-This skill solves a critical problem: agents lose cross-session context. You make decisions, hit errors, mention preferences — and when the session restarts, that context is gone. MEMORY.md helps, but it requires manual curation and doesn't preserve *why* decisions were made.
+By default your agent forgets everything when a session ends. This skill fixes that. Your agent passively listens to your conversations and logs anything worth remembering — contacts, decisions, preferences, daily activity, and more. Ask about it later and get real answers from your actual history, not guesses.
 
-**Session Context Extractor** automatically captures and indexes this context so your agent can answer:
+Examples of what it remembers:
+- "My boss's name is Scott" → stored as a contact, recalled anytime
+- "I prefer dark mode" → stored as a preference
+- "We decided to go with OCI over Azure" → stored as a decision with reasoning
+- "I ran 2.5 miles this morning" → stored and aggregated across the week
+- "I spent $45 on lunch and earned $200 from a client" → tracked, totaled, net calculated
 
-- "What did we decide about OCI vs Azure?" → Full reasoning + constraints + revisit conditions
-- "What errors have we hit with Proxmox?" → Specific error messages + what was tried + what worked
-- "What are Jason's preferences?" → Verified preferences + strength + context
-- "Who did we talk to about the homelab?" → Names + relationships + what was discussed
-
----
-
-## What It Does
-
-### Captures
-- **Decisions**: choice made, reasoning, alternatives rejected, constraints, when to revisit
-- **Errors**: specific error messages, systems affected, attempts made, resolutions, lessons
-- **Preferences**: casually mentioned preferences (verified before acting on them)
-- **Contacts**: people mentioned, relationships, context of conversations
-
-### Stores
-- Structured vault in `memory/context-vault/` (both queryable SQLite + human-readable markdown)
-- Timestamps on everything (when was this learned?)
-- Verification status (are we sure about this preference?)
-- Relationships between facts (error → related decision → lessons learned)
-
-### Enables
-- Natural language queries: "What did we decide...?"
-- Structured searches: by date, system, type, verified status
-- Stale decision detection: "This was decided 6 months ago, still valid?"
-- Preference verification: confirm before acting on casual mentions
+Ask your agent later:
+- "Who is my boss?" → Scott
+- "What did we decide about cloud providers?" → full decision with reasoning
+- "Give me a weekly summary" → totals for miles, sleep, money, hours, tasks, and anything else logged
+- "What are my preferences?" → everything you've mentioned
 
 ---
 
-## Installation in Heyron Container
+## What Gets Captured
 
-### 1. Clone the Skill
+Your agent listens for anything worth remembering and logs it automatically:
 
-In your Heyron container:
+| What you say | What gets stored |
+|---|---|
+| "My boss is Scott" | Contact fact |
+| "I prefer to work in the mornings" | Preference fact |
+| "We decided to use OCI" | Decision fact with reasoning |
+| "I ran 2.3 miles today" | Information fact, aggregated |
+| "I spent $18 on lunch, earned $200 from a client" | Information fact, net calculated |
+| "I slept 7 hours, drank 9 glasses of water" | Information fact, aggregated |
+| "Completed 5 tasks, studied for 2 hours" | Information fact, aggregated |
 
-```bash
-cd ~/.openclaw/workspace/skills
-git clone https://github.com/jasonklutts/session-context-extractor.git
-cd session-context-extractor
+You do not need to ask the agent to log things. It listens and writes automatically.
+
+---
+
+## Step 1 — Install
+
+Paste this into your agent's chat:
+
+> 📋 Paste this to your agent
+
 ```
+use the exec tool to run these commands one at a time:
 
-### 2. Install Dependencies
-
-```bash
+cd ~/.openclaw/workspace/skills
+git clone https://github.com/jasonklutts/session-context-extractor-v2-copy-.git session-context-extractor-v2
+cd session-context-extractor-v2
 npm install
 ```
 
-This installs:
-- `better-sqlite3` — embedded SQLite database
-- `lunr` — full-text search
-- `typescript` & `ts-node` — for running TypeScript directly
+Then verify it worked:
 
-All dependencies are pure Node.js; no system packages or Python required.
+> 📋 Paste this to your agent
 
-### 3. Verify Installation
-
-```bash
-npm run list
+```
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
 ```
 
-This should show: `Found 0 facts` (vault is empty, which is expected).
+You should see: `No recent facts found` — correct, the vault is empty and ready.
 
 ---
 
-## Usage
+## Step 2 — Give Your Agent Its Standing Instructions
 
-### Option A: Tell Your Agent to Use It
+Paste the block below directly into your agent's chat. This is a one-time setup. Your agent will follow these instructions automatically in every conversation from now on.
 
-The simplest way. Just tell your agent:
+> 📋 Paste this to your agent
 
 ```
-"Use the session-context-extractor skill to capture that decision about OCI."
-```
+You now have a persistent memory system. Follow these instructions in every conversation:
 
-Your agent will extract the context and store it automatically.
+PASSIVE CAPTURE — always on:
+Listen to everything said in our conversations. Whenever you hear something worth remembering, write it to ~/.openclaw/workspace/memory/dailies/YYYY-MM-DD.md using today's date. Do this without being asked. Things worth logging include:
 
----
+- Any person mentioned: their name, role, relationship
+  Example: * Contact: Scott is my boss at Delta Utilities
 
-### Option B: Manual Extraction (Advanced)
+- Any preference expressed: tools, habits, styles, opinions
+  Example: * Preference: prefers to work in the mornings
 
-If you want to feed raw session content:
+- Any decision made: what was chosen and why
+  Example: * Decision: chose OCI over Azure because Delta uses OCI
 
-Create a file at `session-input.md` with your conversation and then the agent can process it via the skill.
+- Any daily activity: exercise, sleep, food, work, study, finances
+  Example: * Information: Ran 2.3 miles in 19:45, felt strong
+  Example: * Information: Slept 7 hours, drank 9 glasses water
+  Example: * Information: Worked 8 hours on Delta project
+  Example: * Information: Studied OCI for 2 hours, made 6 commits
+  Example: * Information: Ate 2200 calories, spent $18 on lunch
+  Example: * Information: earned $100 from consulting work
+  Example: * Information: Completed 5 tasks, read 30 pages
 
----
+- Any error or problem encountered: what went wrong and how it was resolved
+  Example: * Error: Proxmox dropped to emergency mode after ungraceful shutdown
 
-### Query the Vault
+FORMAT RULES:
+- Use * Information:, * Decision:, * Contact:, * Preference:, or * Error: at the start of each line
+- Keep earned and spent on separate lines
+- Write money as: earned $X or spent $X (lowercase)
+- One fact per line where possible
+- Always use today's actual date in the filename
 
-Once facts are stored, query them:
+RECALLING — when asked:
+When asked about past context, summaries, totals, or anything from memory, use the exec tool to run:
+cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:query "[the question]"
+Then summarize the results in plain language.
 
-```bash
-# Natural language search
-npm run query "What did we decide about OCI?"
-
-# List all decisions
-npm run list decision
-
-# List all errors
-npm run list error
-
-# Show unverified preferences (need confirmation)
-npm run unverified
-
-# Show stale decisions (older than 90 days)
-npm run stale
-
-# Export recent facts
-npm run export json > facts.json
+Never append distilled session facts to MEMORY.md. All distill output goes to the session-context-extractor skill only.
 ```
 
 ---
 
-## Architecture
+## Step 3 — Start the Overnight Distillation
 
-### File Structure
+The skill automatically processes your daily logs every night at 21:00 and stores them in the memory vault. Start it now:
+
+> 📋 Paste this to your agent
 
 ```
-memory/context-vault/
-  ├── vault.db                    # SQLite database (queryable index)
-  ├── decision/                   # Individual decision markdown files
-  │   ├── 2026-04-26-oci-vs-azure.md
-  │   └── 2026-04-20-cert-priorities.md
-  ├── error/                      # Error logs
-  │   ├── 2026-04-24-proxmox-fs-corruption.md
-  │   └── 2026-04-18-splunk-timeout.md
-  ├── preference/                 # Verified preferences
-  │   ├── 2026-04-20-logging-tools.md
-  │   └── 2026-04-15-vm-management.md
-  ├── contact/                    # People and relationships
-  │   └── 2026-04-15-delta-utilities.md
-  └── INDEX.md                    # Human-readable summary
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:start &
 ```
 
-### Tech Stack
-
-**Database**: SQLite with `better-sqlite3`
-- Embedded, no server, no external dependencies
-- Full-text search with FTS5
-- Audit logging and relationship tracking
-
-**Search**: Lunr.js
-- Pure JavaScript, works offline
-- BM25 ranking, boolean queries, field search
-
-**Language**: TypeScript on Node.js
-- Type safety, readable code
-- Works with Node 22+
-- No compilation needed at runtime
+This runs in the background. You do not need to run it again unless the process is restarted.
 
 ---
 
-## How Extraction Works
+## Step 4 — Just Talk
 
-### Decisions
+You are set up. Have normal conversations with your agent. It handles the rest.
 
-The skill extracts:
-- **Choice Made**: What was chosen
-- **Reasoning**: Why that choice
-- **Constraints**: What mattered (time, budget, existing systems)
-- **Rejected**: What alternatives were ruled out
-- **Revisit Trigger**: When to reconsider this decision
+**Examples of things it will capture automatically:**
 
-Example:
-```markdown
-Title: Prioritize OCI Foundations over AZ-104
-Choice: OCI Foundations (1Z0-1085) is priority
-Reasoning: Delta uses OCI, AZ-900 complete, aligns with new job
-Constraints: Full-time work, limited study hours
-Rejected: Parallel study (too cognitively demanding)
-Revisit: After OCI is passed, reassess AZ-104 based on Delta's Azure plans
-```
+> "My dentist's name is Dr. Rivera, she's at Tulane Medical."
 
-### Errors
+> "I've decided to focus on OCI certification before starting AZ-104."
 
-The skill captures:
-- **Component Affected**: What system/service
-- **Error Messages**: Exact output (searchable)
-- **Attempts Made**: What was tried and the outcome
-- **Resolution**: How it was fixed
-- **Lessons**: What to do differently next time
+> "I prefer bullet points over long paragraphs in summaries."
 
-### Preferences
+> "I ran 2.5 miles this morning, slept 7 hours 45 minutes, earned $250 from a freelance project."
 
-The skill notes:
-- **Topic**: What the preference is about
-- **Preference**: The actual preference
-- **Strength**: Casual vs. moderate vs. strong
-- **Verification**: Unverified until you confirm
+**Examples of things you can ask later:**
+
+> "Who is my dentist?"
+
+> "What certifications am I working on?"
+
+> "What are my formatting preferences?"
+
+> "Give me a comprehensive weekly summary."
+
+> "How many miles did I run this week?"
+
+> "What did I earn and spend this week?"
 
 ---
 
-## Demo: Before vs After
+## Manual Commands (For Testing or Troubleshooting)
 
-### Before (Without the Skill)
+You do not need these during normal use.
 
-```
-Jason: "What did we decide about OCI vs Azure?"
-Jarvis: "I know OCI is the priority but I don't remember the reasoning..."
-```
+**Run distillation manually:**
 
-No context. Requires re-explanation every session.
-
-### After (With the Skill)
+> 📋 Paste this to your agent
 
 ```
-Jason: "What did we decide about OCI vs Azure?"
-Jarvis: "Decision from April 26: OCI Foundations is the priority cert.
-
-Reasoning: Delta uses OCI, you've passed AZ-900, it aligns with your role.
-Constraints: Limited study time while working full-time.
-Alternatives rejected: Parallel study (too cognitively demanding).
-Revisit trigger: After OCI is passed, reassess based on Delta's Azure plans."
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:distill
 ```
 
-Full context, reasoning, and decision criteria — instantly, without re-explaining.
+**Query manually:**
 
----
+> 📋 Paste this to your agent
 
-## Storage & Privacy
+```
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:query "comprehensive weekly summary"
+```
 
-- **All data is local**: Everything stays in `~/.openclaw/workspace/context-vault/`
-- **No cloud sync**: SQLite is self-contained, no external services required
-- **No API keys needed**: Uses your agent's own LLM context
-- **You control what's stored**: Preferences are unverified by default
-- **Human-readable**: All facts are stored as markdown files you can inspect and edit
+**List stored facts:**
 
----
+> 📋 Paste this to your agent
 
-## Integration with MEMORY.md
+```
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
+```
 
-The vault is **separate from but complementary to MEMORY.md**:
+**Full reset (wipe everything and start over):**
 
-| Aspect | Context Vault | MEMORY.md |
-|--------|-------|----------|
-| Format | Structured, queryable | Prose narrative |
-| Updated | Automatically after each session | Weekly hygiene |
-| Purpose | Indexed reference | Executive summary |
-| Search | Fast, structured | Manual reading |
+> 📋 Paste this to your agent
 
-**Workflow**:
-1. Extraction happens immediately (vault stores facts)
-2. Weekly, your agent synthesizes vault entries into MEMORY.md
-3. Both stay in sync: vault is the index, MEMORY.md is the summary
+```
+use the exec tool to run: rm /home/openclaw/.openclaw/workspace/context-vault/vault.db && rm /home/openclaw/.openclaw/workspace/.last_distill_date && cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:distill
+```
 
 ---
 
 ## Troubleshooting
 
-### "vault.db not found"
+**"Extracted 0 facts" when distilling manually**
 
-The vault directory doesn't exist. Your agent will create it automatically on first use, or run:
+The system thinks it already processed your files. Run this then distill again:
 
-```bash
-mkdir -p ~/.openclaw/workspace/context-vault
+> 📋 Paste this to your agent
+
+```
+use the exec tool to run: rm /home/openclaw/.openclaw/workspace/.last_distill_date
 ```
 
-### "Query returns no results"
+**"No results found" when querying**
 
-- Check if facts are stored: `npm run list`
-- Try broader search terms
-- Ensure your agent has actually extracted facts yet
+Check that facts are stored:
 
-### "Permission denied"
+> 📋 Paste this to your agent
 
-Ensure `~/.openclaw/workspace/` is writable by your agent process.
+```
+use the exec tool to run: cd /home/openclaw/.openclaw/workspace/skills/session-context-extractor-v2 && npm run v2:list
+```
+
+If the list is empty, run distill manually. If the list has facts but queries return nothing, try simpler terms — "miles", "sleep", "summary", or the name of a person.
+
+**Old or wrong data showing up**
+
+Do a full reset using the command above.
+
+---
+
+## How It Works
+
+1. Your agent passively listens to your conversations and writes facts to a daily markdown file automatically
+2. Every night at 21:00 the distiller reads your daily files, extracts every fact, and stores everything in a local SQLite database
+3. Numbers and units are parsed automatically — miles, hours, dollars, steps, anything
+4. When you ask a question, the engine searches the vault and returns real answers from your actual history
+5. For numeric queries, facts are grouped by date and totals are computed — no guessing
+
+All data stays local. No cloud. No external services required.
 
 ---
 
 ## License
 
-MIT License. Feel free to fork, extend, and build on this.
+MIT License.
 
 ---
 
 ## Built For
 
 Heyron Agent Jam #1 — May 2026
-
-See SKILL.md for detailed agent integration instructions.

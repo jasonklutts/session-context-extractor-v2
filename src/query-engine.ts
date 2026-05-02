@@ -1,18 +1,17 @@
 import { VaultDatabase } from './db';
 import { Fact, FactType, QueryResult, VaultQuery } from './types';
 import lunr, { Index } from 'lunr';
+import { RetrievalSystem } from './retrieval-strategies';
 
 export class QueryEngine {
   private db: VaultDatabase;
   private index: Index | null = null;
+  private retrieval = new RetrievalSystem();
 
   constructor(db: VaultDatabase) {
     this.db = db;
   }
 
-  /**
-   * Search facts by natural language query
-   */
   search(query: VaultQuery): QueryResult[] {
     const facts = this.db.searchFacts(
       query.text,
@@ -21,34 +20,29 @@ export class QueryEngine {
       query.verifiedOnly
     );
 
-    return facts.map(fact => ({
+    const results = facts.map(fact => ({
       fact,
       score: this.scoreRelevance(fact, query),
       context: this.generateContext(fact),
     }));
+
+    if (this.isAggregateQuery(query.text)) {
+      return this.aggregateResults(results, query);
+    }
+
+    return results.sort((a, b) => b.score - a.score);
   }
 
-  /**
-   * Get all facts of a specific type
-   */
   getByType(type: FactType, limit: number = 50): Fact[] {
     return this.db.getFactsByType(type, limit);
   }
 
-  /**
-   * Get recent facts from the last N days
-   */
   getRecent(days: number = 7): Fact[] {
     return this.db.getRecentFacts(days);
   }
 
-  /**
-   * Answer natural language questions about the vault
-   */
   askQuestion(question: string): QueryResult[] {
-    // Detect question type
     const lowerQuestion = question.toLowerCase();
-
     let query: VaultQuery = { text: question };
 
     if (lowerQuestion.includes('decision') || lowerQuestion.includes('decide')) {
@@ -61,31 +55,146 @@ export class QueryEngine {
       query.type = 'contact';
     }
 
+    if (this.isAggregateQuery(question)) {
+      const allFacts = this.db.getRecentFacts(30);
+      const results = allFacts.map(fact => ({
+        fact,
+        score: this.scoreRelevance(fact, query),
+        context: this.generateContext(fact),
+      }));
+      return this.aggregateResults(results, query);
+    }
+
     return this.search(query);
+  }
+
+  private isAggregateQuery(text: string): boolean {
+    const triggers = [
+      'total', 'how many', 'how much', 'count', 'sum', 'all',
+      'this week', 'today', 'last week', 'per day', 'breakdown', 'summary',
+      'miles', 'ran', 'run', 'drove', 'walked', 'calories', 'sleep', 'slept',
+      'hours', 'water', 'glasses', 'spent', 'earned', 'made', 'income',
+      'tasks', 'commits', 'pages', 'steps', 'cups', 'reps', 'sets',
+    ];
+    const lower = text.toLowerCase();
+    return triggers.some(t => lower.includes(t));
+  }
+
+  private aggregateResults(results: QueryResult[], query: VaultQuery): QueryResult[] {
+    const groupKey = this.detectGroupKey(query.text);
+    const groups = new Map<string, QueryResult[]>();
+
+    for (const result of results) {
+      const key = this.extractGroupValue(result.fact, groupKey);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(result);
+    }
+
+    const aggregated: QueryResult[] = [];
+
+    for (const [key, group] of groups) {
+      const topFact = group.reduce((a, b) => a.score > b.score ? a : b).fact;
+      const totalScore = group.reduce((sum, r) => sum + r.score, 0);
+      const summary = this.buildAggregationSummary(key, group, groupKey);
+
+      aggregated.push({
+        fact: {
+          ...topFact,
+          content: summary,
+          title: `[${groupKey}: ${key}] ${group.length} fact(s)`,
+        },
+        score: totalScore,
+        context: `${group.length} fact(s) grouped by ${groupKey} — ${this.generateContext(topFact)}`,
+      });
+    }
+
+    return aggregated.sort((a, b) => b.score - a.score);
+  }
+
+  private detectGroupKey(text: string): 'date' | 'system' | 'type' {
+    const lower = text.toLowerCase();
+    if (lower.includes('system') || lower.includes('proxmox') || lower.includes('splunk')) return 'system';
+    if (lower.includes('type') || lower.includes('error') || lower.includes('decision')) return 'type';
+    return 'date';
+  }
+
+  private extractGroupValue(fact: Fact, key: 'date' | 'system' | 'type'): string {
+    if (key === 'date') {
+      return new Date(fact.timestamp).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+      });
+    }
+    if (key === 'system') return fact.system ?? 'unknown';
+    return fact.type;
+  }
+
+  /**
+   * Build aggregation summary using pre-extracted metrics from fact.details.metrics.
+   * Falls back to content string if metrics not present (facts distilled before this version).
+   * Any metric key found across the group is summed automatically — no hardcoded units.
+   */
+  private buildAggregationSummary(
+    key: string,
+    group: QueryResult[],
+    groupKey: string
+  ): string {
+    const totals: Record<string, number> = {};
+    const lines: string[] = [];
+
+    for (const r of group) {
+      const rawDetails = r.fact.details as any;
+      const metrics = (rawDetails?.metrics && Object.keys(rawDetails.metrics).length > 0)
+        ? rawDetails.metrics as Record<string, number>
+        : rawDetails as Record<string, number>;
+
+      if (metrics && Object.keys(metrics).length > 0) {
+        // Use pre-extracted metrics stored at distill time
+        for (const [unit, value] of Object.entries(metrics)) {
+          if (typeof value === 'number' && isFinite(value)) {
+            totals[unit] = (totals[unit] || 0) + value;
+          }
+        }
+      }
+
+      lines.push(`- [${new Date(r.fact.timestamp).toLocaleDateString()}] ${r.fact.content}`);
+    }
+
+    
+ // Compute net if we have both earned and spent
+    const earned = totals['dollars_earned'] || 0;
+    const spent = totals['dollars_spent'] || 0;
+    if (earned > 0 || spent > 0) {
+      totals['net'] = earned - spent;
+    }
+
+    let summary = '';
+
+    if (Object.keys(totals).length > 0) {
+      summary += `Totals for ${groupKey}="${key}":\n`;
+      // Sort keys for consistent output order
+      const sortedKeys = Object.keys(totals).sort();
+      for (const metric of sortedKeys) {
+        const value = totals[metric];
+        const label = metric.replace(/_/g, ' ');
+        const display = Math.round(value * 100) / 100;
+        summary += `  ${label}: ${display}\n`;
+      }
+      summary += '\nSource facts:\n';
+    } else {
+      summary += `${group.length} fact(s) for ${groupKey}="${key}":\n`;
+    }
+
+    summary += lines.join('\n');
+    return summary;
   }
 
   private scoreRelevance(fact: Fact, query: VaultQuery): number {
     let score = 0;
-
-    // Verification bonus
-    if (query.verifiedOnly && fact.verified) {
-      score += 10;
-    }
-
-    // Type match bonus
-    if (query.type && fact.type === query.type) {
-      score += 5;
-    }
-
-    // System match bonus
-    if (query.system && fact.system === query.system) {
-      score += 3;
-    }
-
-    // Recency bonus (newer is better)
+    if (query.verifiedOnly && fact.verified) score += 10;
+    if (query.type && fact.type === query.type) score += 5;
+    if (query.system && fact.system === query.system) score += 3;
     const daysOld = (Date.now() - new Date(fact.timestamp).getTime()) / (1000 * 60 * 60 * 24);
     score += Math.max(0, 5 - daysOld / 10);
-
     return score;
   }
 
@@ -95,41 +204,25 @@ export class QueryEngine {
     return `${date} ${verified} - ${fact.type}`;
   }
 
-  /**
-   * Get facts that need verification
-   */
   getUnverified(): Fact[] {
     return this.db.searchFacts('', undefined, undefined, false)
       .filter(f => !f.verified);
   }
 
-  /**
-   * Get decisions that might be stale
-   */
-  getStaledecisions(daysThreshold: number = 90): Fact[] {
+  getStaleDecisions(daysThreshold: number = 90): Fact[] {
     const decisions = this.db.getFactsByType('decision', 1000);
     const cutoff = Date.now() - daysThreshold * 24 * 60 * 60 * 1000;
-
-    return decisions.filter(d => {
-      const timestamp = new Date(d.timestamp).getTime();
-      return timestamp < cutoff;
-    });
+    return decisions.filter(d => new Date(d.timestamp).getTime() < cutoff);
   }
 
-  /**
-   * Get errors by affected system
-   */
   getErrorsBySystem(system: string): Fact[] {
     return this.db.searchFacts('', 'error', system, false);
   }
 
-  /**
-   * Get decision history for a topic
-   */
   getDecisionHistory(topic: string): Fact[] {
     const results = this.db.searchFacts(topic, 'decision', undefined, false);
-    return results.sort((a, b) => {
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
+    return results.sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
   }
 }
