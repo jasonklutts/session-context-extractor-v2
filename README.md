@@ -1,6 +1,6 @@
 # Session Context Extractor V2
 
-Your AI agent forgets everything when a session ends. This skill gives it a memory that actually works.
+Your AI agent forgets everything when a session ends. This skill gives it persistent, structured memory.
 
 Tell your agent about your day, mention someone's name, make a decision — it captures all of it automatically. Ask about it later and get real answers from your actual history. No hallucination. No re-explaining yourself every session.
 
@@ -30,7 +30,7 @@ That also means recall is deterministic. When you ask how many miles you ran thi
 
 - *"Who is my project manager?"* → name, role, when you first mentioned them
 - *"What did we decide about OCI?"* → full decision with date and reasoning
-- *"Give me a weekly summary"* → real totals: miles, sleep, hours worked, money in/out, net
+- *"How do my miles this week compare to last month?"* → exact numbers from your logs
 - *"How many commits did I make this week?"* → exact number from your logs
 
 **Automatic organization** — every fact goes to the right place:
@@ -40,7 +40,7 @@ That also means recall is deterministic. When you ask how many miles you ran thi
 - `context-vault/errors/` — error log with status tracking
 - `USER.md` — your agent's profile of you, updated automatically as it learns
 
-**Weekly archiving** — old daily files are moved to `memory/archive/` every week, the vault is backed up, and the distill log is compressed. Your data stays organized without manual cleanup.
+**Weekly archiving** — old daily files move to `memory/archive/` every week, the vault is backed up, and the distill log is consolidated. Your data stays organized without manual cleanup.
 
 ---
 
@@ -62,9 +62,11 @@ Numbers and units are extracted automatically from any fact — miles, hours, do
 
 ---
 
-## Install
+## Install (Heyron Container)
 
-**Step 1 — Clone and install**
+This skill includes `node_modules` in the repo. On Heyron, npm has cache permission restrictions that prevent standard `npm install` from running. The included `node_modules` bypasses this entirely — no npm required.
+
+**Step 1 — Clone and run setup**
 
 > 📋 Paste this to your agent
 
@@ -73,17 +75,33 @@ use the exec tool to run these commands one at a time:
 cd ~/.openclaw/workspace/skills
 git clone https://github.com/jasonklutts/session-context-extractor-v2.git session-context-extractor-v2
 cd session-context-extractor-v2
-npm install
-npm run v2:setup
+./node_modules/.bin/ts-node src/setup.ts
 ```
 
 The setup command handles everything automatically:
-- Creates all required directories including `context-vault/people/`, `projects/`, `errors/`, `archive/`
-- Adds heartbeat config to `openclaw.json` for nightly distillation
-- Creates or updates `HEARTBEAT.md` with distillation and weekly archive schedules
+- Creates all required directories: `context-vault/people/`, `projects/`, `errors/`, `archive/`, `backups/`
+- Adds heartbeat config to `openclaw.json` — see note below
+- Creates or updates `HEARTBEAT.md` with nightly distillation and weekly archive schedules
 - Creates `USER.md` template if one doesn't exist
 - Creates a backup script at `scripts/backup-vault.sh`
 - Runs first distillation if daily files are already present
+
+### openclaw.json modification
+
+The setup script adds a `heartbeat` block to your `openclaw.json`:
+
+```json
+"heartbeat": {
+  "enabled": true,
+  "prompt": "Read HEARTBEAT.md if it exists. Follow it strictly. Do not infer or repeat old tasks from prior chats. If nothing needs attention, reply HEARTBEAT_OK.",
+  "intervalMinutes": 60,
+  "activeHours": "00-24"
+}
+```
+
+**What this does:** enables the OpenClaw heartbeat system, which fires every 60 minutes and tells your agent to check `HEARTBEAT.md` for scheduled tasks — including nightly distillation and weekly archiving.
+
+**Tradeoff:** the heartbeat runs 24 hours a day and fires every hour. If you want to limit active hours (e.g. 8am–10pm only), change `activeHours` to `"08-22"` in your `openclaw.json` after setup. The setup script backs up your existing `openclaw.json` before modifying it.
 
 **Step 2 — Give your agent its instructions**
 
@@ -98,18 +116,18 @@ PASSIVE CAPTURE — always on:
 Listen to everything said in our conversations. Whenever you hear something worth remembering, write it to ~/.openclaw/workspace/memory/dailies/YYYY-MM-DD.md using today's date. Do this without being asked. Things worth logging include:
 
 - Any person mentioned: name, role, relationship
-  * Contact: Sarah is my project manager at Petco
+  * Contact: Sarah is my project manager at Acme Corp
 
 - Any preference expressed: tools, habits, styles, opinions
   * Preference: prefers bullet points in technical summaries
 
 - Any decision made: what was chosen and why
-  * Decision: Decided to prioritize OCI certification before AZ-104 because Petco uses OCI
+  * Decision: Decided to prioritize OCI certification before AZ-104
 
 - Any daily activity: exercise, sleep, food, work, study, finances
   * Information: Ran 2.3 miles in 19:45, felt good
   * Information: Slept 7 hours, drank 9 glasses water
-  * Information: Worked 8 hours on Petco project
+  * Information: Worked 8 hours on the main project
   * Information: Studied OCI for 2 hours, made 6 commits
   * Information: Ate 2200 calories, spent $18 on lunch
   * Information: earned $100 from consulting work
@@ -136,11 +154,50 @@ That's it. Your agent is set up.
 
 ---
 
+## Example: Agent Remembering Something It Otherwise Wouldn't
+
+**Session 1 — Monday**
+
+> Jason: "My new project manager is Sarah. She prefers weekly status updates over daily standups."
+>
+> Jarvis: *(writes to 2026-04-27.md)*
+> `* Contact: Sarah is my project manager, prefers weekly status updates over daily standups`
+
+**Session 2 — Thursday (new session, no shared context)**
+
+> Jason: "How should I loop in my project manager on the deployment delay?"
+>
+> Jarvis: *(queries vault)* "Based on what I know about Sarah, she prefers weekly status updates rather than daily standups — so a concise written update would likely land better than a quick call. Want me to draft one?"
+
+Sarah was mentioned once on Monday. Three days and multiple sessions later, Jarvis remembered her name, her role, and her communication preference — without being told again.
+
+---
+
+## Example: Photo → Logged Calories → Weekly Total
+
+> Jason: *(uploads photo of dinner plate)*
+> "Estimate the calories in this meal and log it."
+>
+> Jarvis: "That looks like grilled salmon with roasted vegetables and brown rice — I'd estimate around 680 calories. Logged."
+>
+> *(writes to daily file)*
+> `* Information: Ate grilled salmon with roasted vegetables and brown rice, approximately 680 calories`
+
+Later that week:
+
+> Jason: "How many calories did I eat this week?"
+>
+> Jarvis: *(queries vault)* "Based on your logs: Monday 2,150 — Tuesday 2,300 — Wednesday 2,100 — Thursday 1,950 — Friday 680 so far. Weekly total: 9,180 calories."
+
+No typing. No manual tracking. Photo in, structured data out, real totals on demand.
+
+---
+
 ## Daily Usage
 
 **Just talk normally.** Your agent captures everything automatically.
 
-> *"I ran 2.5 miles this morning, slept 7 hours, worked 8 hours on the Petco project, earned $200 from a client."*
+> *"I ran 2.5 miles this morning, slept 7 hours, worked 8 hours, earned $200 from a client."*
 
 > *"My new dentist is Dr. Rivera at Tulane Medical."*
 
@@ -152,9 +209,7 @@ That's it. Your agent is set up.
 
 > *"Who is Dr. Rivera?"*
 
-> *"How many miles did I run this week?"*
-
-> *"What decisions have I made about certifications?"*
+> *"How do my miles this week compare to last month?"*
 
 > *"What did I earn and spend this week?"*
 
@@ -162,7 +217,7 @@ That's it. Your agent is set up.
 
 ## Manual Commands
 
-You don't need these for normal use — your agent handles everything. But they're here if you want to test or troubleshoot.
+You don't need these for normal use. They're here for testing and troubleshooting.
 
 **Run distillation manually:**
 ```
