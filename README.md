@@ -2,8 +2,7 @@
 
 Your AI agent forgets everything when a session ends. This skill gives it persistent, structured memory.
 
-Tell your agent about your day, mention someone's name, make a decision — it captures all of it automatically. Ask about it later and get real answers from your actual history. No hallucination. No re-explaining yourself every session.
-
+Tell your agent about your day, mention someone’s name, make a decision — it captures all of it automatically. Ask about it later and get real answers from your actual history. No hallucination. No re-explaining yourself every session. No external APIs, no third-party services, no accounts to create. Your data stays local — queries run in under 20 milliseconds against a SQLite database on your own machine.
 ---
 
 ## Performance
