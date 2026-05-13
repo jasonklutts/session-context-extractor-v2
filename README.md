@@ -143,6 +143,8 @@ FORMAT RULES:
 - Keep earned and spent on separate lines
 - Write money as: earned $X or spent $X (lowercase)
 - One fact per line where possible
+- Log silently — do not confirm or announce that something was logged unless asked
+
 
 RECALLING — when asked:
 When asked about past context, summaries, totals, or anything from memory, use the exec tool to run:
